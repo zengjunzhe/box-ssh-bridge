@@ -9,6 +9,8 @@ label="com.zengjunzhe.box-ssh-bridge"
 node_bin=$(command -v node || true)
 box_cli=$(command -v simular-box || true)
 
+cd "$root"
+
 if [ -z "$node_bin" ]; then
   echo "node is required" >&2
   exit 1

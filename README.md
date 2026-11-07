@@ -42,6 +42,9 @@ cd box-ssh-bridge
 go build -o box-ssh-bridge ./cmd/box-ssh-bridge
 ```
 
+Prebuilt macOS, Linux, and Windows binaries are on the
+[Releases](https://github.com/zengjunzhe/box-ssh-bridge/releases) page.
+
 ### Public-key authentication
 
 Generate a dedicated client key and authorize it:
