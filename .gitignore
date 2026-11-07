@@ -1,0 +1,7 @@
+/box-ssh-bridge
+/bin/
+/dist/
+*.test
+*.out
+*.log
+.DS_Store
