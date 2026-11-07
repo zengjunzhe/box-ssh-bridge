@@ -111,6 +111,8 @@ func parseFlags(args []string) (Config, bool, error) {
 	flags.StringVar(&cfg.AuthorizedKey, "authorized-key", "", "authorized_keys file; defaults to $BOX_SSH_BRIDGE_HOME/authorized_keys when present")
 	flags.StringVar(&cfg.HostKey, "host-key", "", "SSH host key path")
 	flags.StringVar(&cfg.BoxCLI, "box-cli", "", "path to simular-box CLI entrypoint")
+	flags.StringVar(&cfg.BoxPackage, "box-package", "@simular-ai/box", "package used when --box-cli is npx")
+	flags.StringVar(&cfg.SFTPCommand, "sftp-command", "", "remote command that serves an SFTP subsystem")
 	flags.StringVar(&cfg.StateDir, "state-dir", cfg.StateDir, "state directory")
 	flags.BoolVar(&version, "version", false, "print version")
 	if err := flags.Parse(args); err != nil {
@@ -177,6 +179,15 @@ func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, cfg Config
 
 func handleRequest(s *session, request *ssh.Request) bool {
 	switch request.Type {
+	case "subsystem":
+		var payload struct{ Name string }
+		if err := ssh.Unmarshal(request.Payload, &payload); err != nil || payload.Name != "sftp" || s.cfg.SFTPCommand == "" || s.started {
+			_ = request.Reply(false, nil)
+			return true
+		}
+		s.started = true
+		_ = request.Reply(true, nil)
+		go s.runLocal(s.cfg.SFTPCommand)
 	case "pty-req":
 		term, rows, cols, err := ParsePTY(request.Payload)
 		if err == nil {
@@ -217,15 +228,7 @@ func handleRequest(s *session, request *ssh.Request) bool {
 }
 
 func (s *session) run(command string) {
-	args := []string{"rsh", "--box", s.cfg.Box}
-	if s.pty {
-		args = append(args, "-t")
-	}
-	args = append(args, "--", command)
-	cmd := exec.Command(s.cfg.BoxCLI, args...)
-	if filepath.Ext(s.cfg.BoxCLI) == ".js" {
-		cmd = exec.Command("node", append([]string{s.cfg.BoxCLI}, args...)...)
-	}
+	cmd := boxRSHCommand(s.cfg, command, s.pty)
 	cmd.Env = append(os.Environ(), "TERM="+s.term, "COLUMNS="+fmt.Sprint(s.cols), "LINES="+fmt.Sprint(s.rows))
 
 	input, output, errOutput, err := startCommand(cmd, s)
@@ -252,6 +255,38 @@ func (s *session) run(command string) {
 		}()
 	}
 
+	waitErr := cmd.Wait()
+	code := 0
+	if waitErr != nil {
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) {
+			code = exitErr.ExitCode()
+		} else {
+			code = 255
+		}
+	}
+	s.exit(uint32(code), "")
+}
+
+func (s *session) runLocal(command string) {
+	cmd := exec.Command("sh", "-c", command)
+	input, output, errOutput, err := startCommand(cmd, s)
+	if err != nil {
+		s.exit(255, err.Error())
+		return
+	}
+	go func() {
+		_, _ = io.Copy(s.channel, output)
+	}()
+	if errOutput != nil {
+		go func() {
+			_, _ = io.Copy(s.channel.Stderr(), errOutput)
+		}()
+	}
+	go func() {
+		_, _ = io.Copy(input, s.channel)
+		_ = input.Close()
+	}()
 	waitErr := cmd.Wait()
 	code := 0
 	if waitErr != nil {

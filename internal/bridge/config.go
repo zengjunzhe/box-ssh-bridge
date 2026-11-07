@@ -19,6 +19,8 @@ type Config struct {
 	AuthorizedKey string
 	HostKey       string
 	BoxCLI        string
+	BoxPackage    string
+	SFTPCommand   string
 	StateDir      string
 }
 

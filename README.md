@@ -122,6 +122,8 @@ box-ssh-bridge [flags]
   --authorized-key string  authorized_keys file
   --host-key string        SSH host key path
   --box-cli string         path to the simular-box CLI entrypoint
+  --box-package string     package used when --box-cli is npx
+  --sftp-command string    local command that serves the SFTP subsystem
   --state-dir string       state directory
   --version                print version
 ```
@@ -135,9 +137,9 @@ This is an SSH gateway to the `box rsh` execution API, not a replacement for
 `sshd` inside Box. Consequently:
 
 - Interactive shells and `exec` requests work.
-- SFTP, X11 forwarding, agent forwarding, and TCP port forwarding are not
-  implemented.
-- A session starts `bash -li` by default inside `/workspace`.
+- SFTP works when `--sftp-command` is configured.
+- X11 forwarding, agent forwarding, and TCP port forwarding are not implemented.
+- A shell session starts `bash -li` by default inside `/workspace`.
 - Keep the listener on loopback unless you intentionally add access controls.
 
 ## Development
@@ -150,6 +152,27 @@ go build ./cmd/box-ssh-bridge
 
 The integration boundary is tested with an SSH client against a fake Box CLI in
 `internal/bridge`.
+
+## SFTP
+
+The bridge can expose SSH's `sftp` subsystem without teaching SFTP about
+`box rsh`. Point `--sftp-command` at a local wrapper that connects to a
+loopback-only SFTP server reachable from the machine running the bridge.
+
+For a Simular Box with a loopback-only `sshd` and a dedicated key:
+
+```sh
+#!/bin/sh
+exec /usr/local/bin/npx --yes @simular-ai/box rsh --box main -- \
+  ssh -T -s -p 22222 \
+  -i /home/user/.ssh/box_bridge_client_ed25519 \
+  -o StrictHostKeyChecking=no -o BatchMode=yes \
+  user@127.0.0.1 sftp
+```
+
+Start the bridge with `--sftp-command /path/to/that-wrapper`. The same SSH
+host now supports terminal sessions and SFTP; SFTP paths are the paths inside
+the Box.
 
 ## License
 
