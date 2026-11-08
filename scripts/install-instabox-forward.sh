@@ -13,7 +13,10 @@ mkdir -p "$root/logs" "$HOME/Library/LaunchAgents"
 cat > "$root/forward.sh" <<EOF
 #!/bin/sh
 set -eu
-exec "$npx_bin" --yes instabox@latest port-forward "$machine" 22223:22221 22226:22224
+while :; do
+  "$npx_bin" --yes instabox@latest port-forward "$machine" 22223:22221 ||
+    sleep 5
+done
 EOF
 chmod 0755 "$root/forward.sh"
 

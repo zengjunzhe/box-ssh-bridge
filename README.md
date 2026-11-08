@@ -27,6 +27,11 @@ This project is also useful if you are looking for:
 > “Simular Box SSH”“box rsh 转 SSH”“ShellRS 连接 Simular Box”、
 > “Simular Box 文件传输”和“InstaBox SSH 隧道”的场景。
 
+> Cloud-first deployment: the bridge can run entirely on InstaBox, leaving the
+> client with only ShellRS and the official `instabox port-forward` process.
+> Read [Deployment Field Notes](DEPLOYMENT.md) for the tested topology,
+> multi-account setup, SFTP path, auto-pause behavior, and recovery steps.
+
 ```text
 SSH / SFTP client
         |
@@ -313,6 +318,24 @@ ssh -i instabox-client_ed25519 -p 22223 \
 
 [`scripts/install-instabox-forward.sh`](scripts/install-instabox-forward.sh)
 turns this into a macOS launchd service.
+
+### InstaBox auto-pause
+
+InstaBox can pause itself when idle:
+
+- On the free plan, idle pause is fixed at 30 minutes.
+- The current machine has a 240-minute maximum run.
+- A self-paused machine wakes when SSH traffic or `port-forward` reconnects.
+- Memory and processes are preserved while paused.
+- A maximum-run pause has a cooldown; free-plan cooldowns can become long
+  after repeated max-run pauses.
+- While paused, open SSH and SFTP sessions disconnect. Reconnect after the
+  machine wakes.
+
+The launchd wrapper retries `instabox port-forward` every five seconds. The
+reconnect itself wakes an idle-paused InstaBox. Paid plans can set
+`instabox auto-suspend <machine> 0` to disable idle pause. For a long silent
+task, hold an InstaBox activity lease rather than polling in the background.
 
 ### 3. Enable SFTP on InstaBox and Cloud Box
 
