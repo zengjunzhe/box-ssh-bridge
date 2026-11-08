@@ -264,11 +264,15 @@ func (s *session) run(command string) {
 		return
 	}
 	go func() {
+		if s.pty {
+			_ = localizeBoxOutput(s.channel, output)
+			return
+		}
 		_, _ = io.Copy(s.channel, output)
 	}()
 	if errOutput != nil {
 		go func() {
-			_, _ = io.Copy(s.channel.Stderr(), errOutput)
+			_ = localizeBoxOutput(s.channel.Stderr(), errOutput)
 		}()
 	}
 	go func() {
