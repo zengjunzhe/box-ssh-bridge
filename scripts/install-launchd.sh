@@ -8,6 +8,7 @@ plist="$HOME/Library/LaunchAgents/com.zengjunzhe.box-ssh-bridge.plist"
 label="com.zengjunzhe.box-ssh-bridge"
 node_bin=$(command -v node || true)
 box_cli=$(command -v simular-box || true)
+users_file="$state/users.json"
 
 cd "$root"
 
@@ -32,6 +33,9 @@ if [ ! -f "$state/client_ed25519" ]; then
 fi
 
 go build -trimpath -o "$bin" "$root/cmd/box-ssh-bridge"
+if [ ! -f "$users_file" ]; then
+  printf '{\n  "user": "main"\n}\n' > "$users_file"
+fi
 
 cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -43,8 +47,7 @@ cat > "$plist" <<EOF
   <array>
     <string>$bin</string>
     <string>--listen</string><string>127.0.0.1:22220</string>
-    <string>--box</string><string>main</string>
-    <string>--user</string><string>user</string>
+    <string>--users-file</string><string>$users_file</string>
     <string>--state-dir</string><string>$state</string>
     <string>--authorized-key</string><string>$state/authorized_keys</string>
     <string>--box-cli</string><string>$box_cli</string>
@@ -68,3 +71,4 @@ launchctl bootstrap "gui/$(id -u)" "$plist"
 launchctl kickstart -k "gui/$(id -u)/$label"
 echo "installed $label"
 echo "client key: $state/client_ed25519"
+echo "users: $users_file"

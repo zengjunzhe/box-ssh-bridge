@@ -145,6 +145,69 @@ Open the host. For SFTP, enable the Files sidebar after the host is connected.
 The SFTP path is the path in the Simular Box, normally `/workspace` or
 `/home/user`.
 
+## Multiple Boxes
+
+One bridge process can route several Simular Boxes. Create a `users.json`
+map from SSH usernames to Box names or IDs:
+
+```json
+{
+  "work": "box-work",
+  "personal": "box-personal",
+  "main": "main"
+}
+```
+
+If the Boxes belong to different Simular accounts, use an object per user and
+give each account its own Box CLI home:
+
+```json
+{
+  "work": {
+    "box": "main",
+    "boxHome": "/Users/me/.simular-box-work"
+  },
+  "personal": {
+    "box": "main",
+    "boxHome": "/Users/me/.simular-box-personal"
+  }
+}
+```
+
+The bridge sets `BOX_HOME` for that session only. Log in once with the same
+value:
+
+```bash
+BOX_HOME="$HOME/.simular-box-work" npx @simular-ai/box login
+```
+
+Start with:
+
+```bash
+./box-ssh-bridge \
+  --listen 127.0.0.1:22220 \
+  --users-file "$HOME/Library/Application Support/box-ssh-bridge/users.json" \
+  --authorized-key "$HOME/Library/Application Support/box-ssh-bridge/authorized_keys"
+```
+
+Each SSH username selects its own Box:
+
+```bash
+ssh -i box-bridge-key -p 22220 work@127.0.0.1
+ssh -i box-bridge-key -p 22220 personal@127.0.0.1
+```
+
+In ShellRS, create one host per Box, using the same address and port but a
+different username. For SFTP, include `{box}` in `--sftp-command`; it is
+replaced per SSH session:
+
+```text
+--sftp-command "/path/to/box-sftp.sh {box}"
+```
+
+Without `--users-file`, the original single-Box `--box` and `--user` behavior
+is unchanged.
+
 ## Cloud deployment: InstaBox as the SSH gateway
 
 The bridge can run on an InstaBox cloud machine and reach Simular Box from
@@ -316,6 +379,7 @@ box-ssh-bridge [flags]
   --listen string          local SSH listen address (default "127.0.0.1:22220")
   --box string             Simular Box name or ID (default "main")
   --user string            SSH username (default "user")
+  --users-file string      JSON map of SSH usernames to Box names or IDs
   --password string        SSH password
   --authorized-key string  authorized_keys file
   --host-key string        SSH host key path
@@ -345,6 +409,8 @@ override it with `--state-dir` or `BOX_SSH_BRIDGE_HOME`.
 - X11 forwarding, agent forwarding, and TCP port forwarding are not
   implemented.
 - SFTP requires the optional loopback-only SFTP backend described above.
+- Multiple Boxes can share one listener; each needs its own SSH username and
+  `users.json` entry.
 - A shell session starts `bash -li` inside `/workspace`.
 
 ## Development

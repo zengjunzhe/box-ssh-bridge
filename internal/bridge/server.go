@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,6 +39,9 @@ func Run(version string, args []string) error {
 	if cfg.BoxCLI == "" {
 		return errors.New("cannot find @simular-ai/box; pass --box-cli")
 	}
+	if len(cfg.BoxUsers) == 0 {
+		cfg.BoxUsers = map[string]BoxRoute{cfg.User: {Box: cfg.Box}}
+	}
 	if cfg.Password == "" && cfg.AuthorizedKey == "" {
 		cfg.Password = randomToken(18)
 		fmt.Fprintf(os.Stderr, "SSH password: %s\n", cfg.Password)
@@ -55,7 +59,7 @@ func Run(version string, args []string) error {
 			return fmt.Errorf("authorized key: %w", err)
 		}
 		server.PublicKeyCallback = func(metadata ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-			if metadata.User() == cfg.User && keys.Contains(key) {
+			if _, ok := cfg.boxForUser(metadata.User()); ok && keys.Contains(key) {
 				return nil, nil
 			}
 			return nil, errors.New("authentication failed")
@@ -63,7 +67,7 @@ func Run(version string, args []string) error {
 	}
 	if cfg.Password != "" {
 		server.PasswordCallback = func(metadata ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-			if metadata.User() == cfg.User && constantTimeEqual(string(password), cfg.Password) {
+			if _, ok := cfg.boxForUser(metadata.User()); ok && constantTimeEqual(string(password), cfg.Password) {
 				return nil, nil
 			}
 			return nil, errors.New("authentication failed")
@@ -76,7 +80,7 @@ func Run(version string, args []string) error {
 		return err
 	}
 	defer listener.Close()
-	log.Printf("SSH bridge listening on %s -> box %s (user %s)", cfg.Listen, cfg.Box, cfg.User)
+	log.Printf("SSH bridge listening on %s", cfg.String())
 
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
@@ -107,6 +111,7 @@ func parseFlags(args []string) (Config, bool, error) {
 	flags.StringVar(&cfg.Listen, "listen", defaultListen, "local SSH listen address")
 	flags.StringVar(&cfg.Box, "box", defaultBox, "Simular Box name or ID")
 	flags.StringVar(&cfg.User, "user", defaultUser, "SSH username exposed to clients")
+	flags.StringVar(&cfg.UsersFile, "users-file", "", "JSON map of SSH username to Box name or ID")
 	flags.StringVar(&cfg.Password, "password", "", "SSH password; one is generated when no key authentication is configured")
 	flags.StringVar(&cfg.AuthorizedKey, "authorized-key", "", "authorized_keys file; defaults to $BOX_SSH_BRIDGE_HOME/authorized_keys when present")
 	flags.StringVar(&cfg.HostKey, "host-key", "", "SSH host key path")
@@ -125,6 +130,19 @@ func parseFlags(args []string) (Config, bool, error) {
 		path := defaultAuthorizedKeys(cfg.StateDir)
 		if _, err := os.Stat(path); err == nil {
 			cfg.AuthorizedKey = path
+		}
+	}
+	if cfg.UsersFile != "" {
+		users, err := LoadUsers(cfg.UsersFile)
+		if err != nil {
+			return Config{}, false, err
+		}
+		cfg.BoxUsers = users
+	}
+	if cfg.BoxUsers == nil && !configHasFlag(args, "box") && !configHasFlag(args, "user") {
+		users, err := LoadUsers(filepath.Join(cfg.StateDir, "users.json"))
+		if err == nil {
+			cfg.BoxUsers = users
 		}
 	}
 	return cfg, version, nil
@@ -151,13 +169,19 @@ func handleConn(raw net.Conn, server *ssh.ServerConfig, cfg Config) {
 		if err != nil {
 			continue
 		}
-		go handleSession(channel, channelRequests, cfg)
+		route, ok := cfg.boxForUser(conn.User())
+		if !ok {
+			_ = channel.Close()
+			continue
+		}
+		go handleSession(channel, channelRequests, cfg, route)
 	}
 }
 
 type session struct {
 	channel ssh.Channel
 	cfg     Config
+	route   BoxRoute
 	term    string
 	rows    uint32
 	cols    uint32
@@ -167,9 +191,9 @@ type session struct {
 	master  *os.File
 }
 
-func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, cfg Config) {
+func handleSession(channel ssh.Channel, requests <-chan *ssh.Request, cfg Config, route BoxRoute) {
 	defer channel.Close()
-	s := &session{channel: channel, cfg: cfg, term: "xterm-256color", rows: 24, cols: 80, closed: make(chan struct{})}
+	s := &session{channel: channel, cfg: cfg, route: route, term: "xterm-256color", rows: 24, cols: 80, closed: make(chan struct{})}
 	for request := range requests {
 		if !handleRequest(s, request) {
 			return
@@ -228,8 +252,11 @@ func handleRequest(s *session, request *ssh.Request) bool {
 }
 
 func (s *session) run(command string) {
-	cmd := boxRSHCommand(s.cfg, command, s.pty)
+	cmd := boxRSHCommand(s.cfg, s.route.Box, command, s.pty)
 	cmd.Env = append(os.Environ(), "TERM="+s.term, "COLUMNS="+fmt.Sprint(s.cols), "LINES="+fmt.Sprint(s.rows))
+	if s.route.BoxHome != "" {
+		cmd.Env = append(cmd.Env, "BOX_HOME="+s.route.BoxHome)
+	}
 
 	input, output, errOutput, err := startCommand(cmd, s)
 	if err != nil {
@@ -269,6 +296,8 @@ func (s *session) run(command string) {
 }
 
 func (s *session) runLocal(command string) {
+	command = strings.ReplaceAll(command, "{box}", shellQuote(s.route.Box))
+	command = strings.ReplaceAll(command, "{box_home}", shellQuote(s.route.BoxHome))
 	cmd := exec.Command("sh", "-c", command)
 	input, output, errOutput, err := startCommand(cmd, s)
 	if err != nil {

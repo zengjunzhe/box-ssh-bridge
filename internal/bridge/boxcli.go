@@ -3,10 +3,11 @@ package bridge
 import (
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
-func boxRSHCommand(cfg Config, command string, tty bool) *exec.Cmd {
-	args := []string{"rsh", "--box", cfg.Box}
+func boxRSHCommand(cfg Config, box, command string, tty bool) *exec.Cmd {
+	args := []string{"rsh", "--box", box}
 	if tty {
 		args = append(args, "-t")
 	}
@@ -21,4 +22,8 @@ func boxRSHCommand(cfg Config, command string, tty bool) *exec.Cmd {
 		return exec.Command("node", append([]string{name}, args...)...)
 	}
 	return exec.Command(name, args...)
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }

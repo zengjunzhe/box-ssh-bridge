@@ -6,6 +6,7 @@ install_dir="${BOX_SSH_BRIDGE_DIR:-$HOME/box-ssh-bridge}"
 listen="${BOX_SSH_BRIDGE_LISTEN:-127.0.0.1:22221}"
 box="${BOX_SSH_BRIDGE_BOX:-main}"
 user="${BOX_SSH_BRIDGE_USER:-user}"
+users_file="${BOX_SSH_BRIDGE_USERS_FILE:-}"
 
 mkdir -p "$install_dir/state"
 
@@ -20,13 +21,20 @@ chmod 644 "$install_dir/authorized_keys"
 
 cat > "$install_dir/sftp-command.sh" <<EOF
 #!/bin/sh
-exec /usr/local/bin/npx --yes @simular-ai/box rsh --box $box -- \\
+box="\${1:-$box}"
+exec /usr/local/bin/npx --yes @simular-ai/box rsh --box "\$box" -- \\
   ssh -T -s -p 22222 \\
   -i /home/user/.ssh/box_bridge_client_ed25519 \\
   -o StrictHostKeyChecking=no -o BatchMode=yes \\
   user@127.0.0.1 sftp
 EOF
 chmod 0755 "$install_dir/sftp-command.sh"
+
+if [ -n "$users_file" ]; then
+  routing="--users-file $users_file"
+else
+  routing="--box $box --user $user"
+fi
 
 unit=/etc/systemd/system/box-ssh-bridge.service
 sudo tee "$unit" >/dev/null <<EOF
@@ -41,7 +49,7 @@ Group=$user
 Environment=HOME=$HOME
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=$install_dir
-ExecStart=$install_dir/box-ssh-bridge --listen $listen --box $box --user $user --state-dir $install_dir/state --authorized-key $install_dir/authorized_keys --box-cli /usr/local/bin/npx --box-package @simular-ai/box --sftp-command $install_dir/sftp-command.sh
+ExecStart=$install_dir/box-ssh-bridge --listen $listen $routing --state-dir $install_dir/state --authorized-key $install_dir/authorized_keys --box-cli /usr/local/bin/npx --box-package @simular-ai/box --sftp-command "$install_dir/sftp-command.sh {box}"
 Restart=always
 RestartSec=5
 
